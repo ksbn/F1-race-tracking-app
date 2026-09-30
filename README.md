@@ -96,4 +96,4 @@ Keep a single instance. State lives in memory, so a second instance would double
 
 ## License
 
-Add a license of your choice.
+MIT
