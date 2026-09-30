@@ -1,0 +1,12 @@
+services:
+  f1:
+    build: .
+    ports: ["8000:8000"]
+    environment:
+      OPENF1_TOKEN: ${OPENF1_TOKEN:-}
+      REPLAY_SESSION: ${REPLAY_SESSION:-latest}
+      REPLAY_SPEED: ${REPLAY_SPEED:-5}
+    volumes: ["f1data:/data"]
+    restart: unless-stopped
+volumes:
+  f1data:

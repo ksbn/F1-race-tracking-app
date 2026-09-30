@@ -1,16 +1,25 @@
-import asyncio, os, time
+import asyncio, logging, os, time
+from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+import db
+
 OPENF1 = "https://api.openf1.org/v1"
 JOLPICA = "https://api.jolpi.ca/ergast/f1"
-TOKEN = os.getenv("OPENF1_TOKEN")  # optional: paid OpenF1 token enables real-time
+TOKEN = os.getenv("OPENF1_TOKEN")  
 POLL_SECONDS = float(os.getenv("POLL_SECONDS", "4"))
+SESSION = os.getenv("REPLAY_SESSION", "latest")  
+SPEED = float(os.getenv("REPLAY_SPEED", "5"))
+REPLAY = SESSION != "latest"
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger("f1")
 
-state = {"session": None, "drivers": {}, "rows": [], "status": "starting", "updated": None}
+state = {"session": None, "drivers": {}, "rows": [], "status": "starting", "updated": None, "cars": {},
+         "messages": [], "weather": None, "has_outline": False, "replay": False}
 _raw = {"pos": {}, "gap": {}, "laps": {}, "stints": {}, "since_pos": None, "since_gap": None, "key": None}
 clients: set[WebSocket] = set()
 _cache: dict = {}
@@ -18,9 +27,27 @@ _cache: dict = {}
 
 async def get(client, path, **params):
     headers = {"Authorization": f"Bearer {TOKEN}"} if TOKEN else {}
-    r = await client.get(f"{OPENF1}/{path}", params=params, headers=headers, timeout=15)
+    for attempt in range(4):  
+        r = await client.get(f"{OPENF1}/{path}", params=params, headers=headers, timeout=15)
+        if r.status_code != 429:
+            break
+        await asyncio.sleep(2 ** attempt)
+    if r.status_code == 404:  
+        return []
     r.raise_for_status()
     return r.json()
+
+
+async def inc(client, path, since_key, cap, default=None):
+    """Fetch only records newer than the last one seen."""
+    params = {"session_key": _raw["key"], **cap}
+    since = _raw[since_key] or default
+    if since:
+        params["date>"] = since
+    rows = await get(client, path, **params)
+    if rows:
+        _raw[since_key] = max(r["date"] for r in rows)
+    return rows
 
 
 def build_rows():
@@ -42,7 +69,7 @@ def build_rows():
             "best": min((l["lap_duration"] for l in done), default=None),
             "tyre": stint.get("compound") if stint else None,
             "tyre_age": (stint.get("tyre_age_at_start") or 0) + (
-                (max((l["lap_number"] for l in laps), default=0) - stint["lap_start"]) if stint else 0) if stint else None,
+                (max((l["lap_number"] for l in laps), default=0) - (stint["lap_start"] or 0)) if stint else 0) if stint else None,
         })
     rows.sort(key=lambda r: r["pos"])
     return rows
@@ -60,41 +87,70 @@ async def broadcast():
 
 
 async def poll_loop():
-    last_slow = 0
+    last_slow, t0 = 0, time.time()
     async with httpx.AsyncClient() as client:
         while True:
             try:
-                sess = (await get(client, "sessions", session_key="latest"))[-1]
-                if sess["session_key"] != _raw["key"]:  # new session: reset everything
-                    _raw.update(pos={}, gap={}, laps={}, stints={}, since_pos=None, since_gap=None,
-                                key=sess["session_key"])
-                    drivers = await get(client, "drivers", session_key="latest")
-                    state["drivers"] = {d["driver_number"]: d for d in drivers}
-                    last_slow = 0
+                sess = (await get(client, "sessions", session_key=SESSION))[-1]
+                if sess["session_key"] != _raw["key"]:  
+                    _raw.update(pos={}, gap={}, laps={}, stints={}, key=sess["session_key"], outline=None,
+                                since_pos=None, since_gap=None, since_loc=None, since_rc=None, since_wx=None)
+                    drivers = await get(client, "drivers", session_key=sess["session_key"])
+                    state.update(drivers={d["driver_number"]: d for d in drivers}, cars={}, messages=[],
+                                 weather=None, has_outline=False)
+                    last_slow, t0 = 0, time.time()
+                    db.save_session(sess)
+                    log.info("session %s %s", sess["session_key"], sess.get("session_name"))
                 state["session"] = {k: sess.get(k) for k in
                                     ("session_name", "session_type", "circuit_short_name", "country_name", "date_start", "date_end")}
+                state["replay"] = REPLAY
+                if REPLAY:  
+                    now = min(datetime.fromisoformat(sess["date_start"]) + timedelta(seconds=(time.time() - t0) * SPEED),
+                              datetime.fromisoformat(sess["date_end"]))
+                else:
+                    now = datetime.now(timezone.utc)
+                upper = now.isoformat()
+                cap = {"date<": upper} if REPLAY else {}
 
-                kw = {"session_key": "latest"}
-                positions = await get(client, "position", **kw, **({"date>": _raw["since_pos"]} if _raw["since_pos"] else {}))
-                for p in positions:
+                for p in await inc(client, "position", "since_pos", cap):
                     _raw["pos"][p["driver_number"]] = p["position"]
-                    _raw["since_pos"] = max(_raw["since_pos"] or "", p["date"])
-
-                gaps = await get(client, "intervals", **kw, **({"date>": _raw["since_gap"]} if _raw["since_gap"] else {}))
-                for g in gaps:
+                for g in await inc(client, "intervals", "since_gap", cap):
                     _raw["gap"][g["driver_number"]] = g
-                    _raw["since_gap"] = max(_raw["since_gap"] or "", g["date"])
+                msgs = await inc(client, "race_control", "since_rc", cap)
+                state["messages"] = (state["messages"] + msgs)[-40:]
+                wx = await inc(client, "weather", "since_wx", cap)
+                state["weather"] = wx[-1] if wx else state["weather"]
+                for c in await inc(client, "location", "since_loc", cap, (now - timedelta(seconds=10)).isoformat()):
+                    if c["x"] or c["y"]:
+                        state["cars"][c["driver_number"]] = [c["x"], c["y"]]
 
-                if time.time() - last_slow > 15:  # laps + tyres change slowly
+                if time.time() - last_slow > 60: 
                     last_slow = time.time()
                     by_driver: dict = {}
-                    for l in await get(client, "laps", **kw):
-                        by_driver.setdefault(l["driver_number"], []).append(l)
+                    for l in await get(client, "laps", session_key=_raw["key"]):
+                        if not REPLAY or (l.get("date_start") or "") <= upper:
+                            by_driver.setdefault(l["driver_number"], []).append(l)
                     _raw["laps"] = {k: sorted(v, key=lambda l: l["lap_number"]) for k, v in by_driver.items()}
-                    for s in await get(client, "stints", **kw):
+                    await asyncio.to_thread(db.save_laps, _raw["key"], _raw["laps"])
+                    for s in await get(client, "stints", session_key=_raw["key"]):
+                        seen = max((l["lap_number"] for l in _raw["laps"].get(s["driver_number"], [])), default=0)
                         cur = _raw["stints"].get(s["driver_number"])
-                        if not cur or s["stint_number"] >= cur["stint_number"]:
+                        if (s["lap_start"] or 0) <= max(seen, 1) and (not cur or s["stint_number"] >= cur["stint_number"]):
                             _raw["stints"][s["driver_number"]] = s
+
+                if _raw["outline"] is None:  
+                    for num, ls in _raw["laps"].items():
+                        ok = [l for l in ls if l.get("lap_duration") and l.get("date_start") and l["lap_number"] > 1]
+                        if not ok:
+                            continue
+                        s0 = datetime.fromisoformat(ok[0]["date_start"])
+                        s1 = s0 + timedelta(seconds=ok[0]["lap_duration"])
+                        if s1 <= now:
+                            pts = await get(client, "location", session_key=_raw["key"], driver_number=num,
+                                            **{"date>": s0.isoformat(), "date<": s1.isoformat()})
+                            _raw["outline"] = [[p["x"], p["y"]] for p in pts[::3]]
+                            state["has_outline"] = bool(_raw["outline"])
+                        break
 
                 state["rows"] = build_rows()
                 state["status"] = "ok" if state["rows"] else "No timing data for this session yet"
@@ -103,14 +159,17 @@ async def poll_loop():
                 code = e.response.status_code
                 state["status"] = ("Live data needs an OpenF1 token (set OPENF1_TOKEN). Showing last known data."
                                    if code in (401, 402, 403) else f"OpenF1 error {code}; retrying")
-            except Exception as e:  # network blips must never kill the loop
+                log.exception(state["status"])
+            except Exception as e:  
                 state["status"] = f"Connection problem ({type(e).__name__}); retrying"
+                log.exception(state["status"])
             await broadcast()
             await asyncio.sleep(POLL_SECONDS)
 
 
 @asynccontextmanager
 async def lifespan(app):
+    db.init()
     task = asyncio.create_task(poll_loop())
     yield
     task.cancel()
@@ -150,6 +209,26 @@ async def schedule():
     d = await cached_jolpica("current.json", ttl=3600)
     return [{"round": r["round"], "name": r["raceName"], "circuit": r["Circuit"]["circuitName"],
              "date": r["date"], "time": r.get("time")} for r in d["RaceTable"]["Races"]]
+
+
+@app.get("/health")
+async def health():
+    return {"ok": True, "status": state["status"], "updated": state["updated"], "replay": REPLAY}
+
+
+@app.get("/api/laps")
+async def api_laps(session_key: int | None = None):
+    return await asyncio.to_thread(db.laps, session_key or _raw["key"])
+
+
+@app.get("/api/outline")
+async def api_outline():
+    return _raw.get("outline") or []
+
+
+@app.get("/api/sessions")
+async def api_sessions():
+    return await asyncio.to_thread(db.sessions)
 
 
 @app.websocket("/ws")
