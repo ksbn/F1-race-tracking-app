@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pit Wall · F1 Live</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700&family=Barlow:wght@400;500&display=swap">
+<style>
+:root{--bg:#e8edf1;--panel:#f7f9fa;--ink:#13202b;--mute:#5d6b77;--line:#cbd4db;--red:#e10600;--pur:#8a2be2}
+@media(prefers-color-scheme:dark){:root{--bg:#0f1720;--panel:#17222d;--ink:#e9eef2;--mute:#8ea0af;--line:#2a3947}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:400 15px/1.4 Barlow,system-ui,sans-serif}
+header{display:flex;flex-wrap:wrap;gap:8px 24px;align-items:baseline;padding:20px clamp(12px,4vw,40px) 8px}
+h1{font:700 34px/1 "Barlow Condensed",sans-serif;margin:0;letter-spacing:.5px}
+#sess{font:500 20px "Barlow Condensed",sans-serif;color:var(--mute)}
+#status{margin-left:auto;font-size:13px;color:var(--mute)}#status.bad{color:var(--red)}
+nav{display:flex;gap:4px;padding:0 clamp(12px,4vw,40px)}
+nav button{font:500 18px "Barlow Condensed";padding:8px 16px;border:0;background:none;color:var(--mute);cursor:pointer;border-bottom:3px solid transparent}
+nav button[aria-selected=true]{color:var(--ink);border-color:var(--red)}nav button:focus-visible{outline:2px solid var(--red)}
+main{padding:12px clamp(12px,4vw,40px) 40px}.wrap{overflow-x:auto;background:var(--panel);border:1px solid var(--line)}
+table{width:100%;border-collapse:collapse;min-width:640px;font-variant-numeric:tabular-nums}
+th{font:500 14px Barlow;color:var(--mute);text-align:right;padding:8px 10px;border-bottom:1px solid var(--line)}
+td{padding:7px 10px;text-align:right;border-bottom:1px solid var(--line);font:500 17px "Barlow Condensed"}
+th:nth-child(-n+3),td:nth-child(-n+3){text-align:left}td.pos{width:44px;font-weight:700;font-size:20px}
+td.drv{font-weight:700;letter-spacing:.5px}td.drv i{display:inline-block;width:5px;height:18px;margin-right:10px;vertical-align:-3px}
+td.team{font:400 14px Barlow;color:var(--mute)}.best{color:var(--pur);font-weight:700}
+.tyre{display:inline-block;min-width:22px;padding:0 5px;border:2px solid;border-radius:11px;font-size:13px;text-align:center}
+.empty{padding:40px 20px;color:var(--mute)}.hide{display:none}
+</style></head><body>
+<header><h1>Pit Wall</h1><span id="sess">Connecting…</span><span id="status">&nbsp;</span></header>
+<nav role="tablist"><button role="tab" aria-selected="true" data-t="live">Timing</button>
+<button role="tab" aria-selected="false" data-t="stand">Standings</button>
+<button role="tab" aria-selected="false" data-t="sched">Calendar</button></nav>
+<main>
+<section id="live" class="wrap"><table><thead><tr><th>Pos</th><th>Driver</th><th>Team</th><th>Gap</th><th>Interval</th><th>Last lap</th><th>Best lap</th><th>Tyre</th></tr></thead><tbody id="tb"></tbody></table><div id="e1" class="empty">Waiting for timing data…</div></section>
+<section id="stand" class="wrap hide"><table><thead><tr><th>Pos</th><th>Driver</th><th>Team</th><th>Wins</th><th>Points</th></tr></thead><tbody></tbody></table></section>
+<section id="sched" class="wrap hide"><table><thead><tr><th>Rd</th><th>Grand Prix</th><th>Circuit</th><th>Date</th></tr></thead><tbody></tbody></table></section>
+</main>
+<script>
+const $=s=>document.querySelector(s), TY={SOFT:"#e10600",MEDIUM:"#f5c400",HARD:"#9aa5ad",INTERMEDIATE:"#2bb24c",WET:"#2f6fe0"};
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const lap=s=>s==null?"–":(s>=60?Math.floor(s/60)+":"+(s%60).toFixed(3).padStart(6,"0"):s.toFixed(3));
+const gap=g=>g==null?"–":typeof g==="number"?"+"+g.toFixed(3):esc(g);
+function render(s){
+  const x=s.session;$("#sess").textContent=x?`${x.country_name} · ${x.session_name}`:"Connecting…";
+  const st=$("#status");st.textContent=s.status==="ok"?`Updated ${s.updated}`:s.status;st.className=s.status==="ok"?"":"bad";
+  const best=Math.min(...s.rows.map(r=>r.best||Infinity));
+  $("#e1").classList.toggle("hide",s.rows.length>0);
+  $("#tb").innerHTML=s.rows.map((r,i)=>`<tr><td class="pos">${r.pos}</td>
+   <td class="drv"><i style="background:${esc(r.colour)}"></i>${esc(r.code)}</td><td class="team">${esc(r.team)}</td>
+   <td>${i?gap(r.gap):"Leader"}</td><td>${i?gap(r.interval):""}</td><td>${lap(r.last)}</td>
+   <td class="${r.best===best?"best":""}">${lap(r.best)}</td>
+   <td>${r.tyre?`<span class="tyre" style="border-color:${TY[r.tyre]||"#888"}">${esc(r.tyre[0])}${r.tyre_age??""}</span>`:"–"}</td></tr>`).join("");
+}
+function connect(){
+  const ws=new WebSocket((location.protocol==="https:"?"wss://":"ws://")+location.host+"/ws");
+  ws.onmessage=e=>render(JSON.parse(e.data));
+  ws.onclose=()=>{$("#status").textContent="Disconnected. Reconnecting…";$("#status").className="bad";setTimeout(connect,2000)};
+}
+connect();
+async function load(url,sel,row){try{const d=await (await fetch(url)).json();
+  document.querySelector(sel+" tbody").innerHTML=d.map(row).join("")}catch{document.querySelector(sel+" tbody").innerHTML='<tr><td colspan="5" class="empty">Could not load data.</td></tr>'}}
+let loaded={};
+document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{
+  document.querySelectorAll("nav button").forEach(o=>o.setAttribute("aria-selected",o===b));
+  ["live","stand","sched"].forEach(id=>$("#"+id).classList.toggle("hide",id!==b.dataset.t));
+  if(loaded[b.dataset.t])return;loaded[b.dataset.t]=1;
+  if(b.dataset.t==="stand")load("/api/standings","#stand",r=>`<tr><td class="pos">${r.pos}</td><td class="drv">${esc(r.name)}</td><td class="team">${esc(r.team)}</td><td>${r.wins}</td><td>${r.points}</td></tr>`);
+  if(b.dataset.t==="sched")load("/api/schedule","#sched",r=>`<tr><td class="pos">${r.round}</td><td class="drv">${esc(r.name)}</td><td class="team">${esc(r.circuit)}</td><td>${esc(r.date)}</td></tr>`);
+});
+</script></body></html>
