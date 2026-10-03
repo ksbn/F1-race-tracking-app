@@ -1,4 +1,4 @@
-import asyncio, logging, os, time
+import asyncio, gzip, json, logging, os, time
 from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
 import httpx
@@ -25,7 +25,41 @@ clients: set[WebSocket] = set()
 _cache: dict = {}
 
 
+SNAP = None  # bundled snapshot (dict), set when OpenF1 is unreachable
+
+
+def local_get(path, p):
+    """Answer an OpenF1-style query from the bundled snapshot."""
+    if path == "location" and "driver_number" not in p:
+        return []  # snapshots keep only the track outline, no live car positions
+    out = []
+    for r in SNAP.get(path, []):
+        if "driver_number" in p and r.get("driver_number") != int(p["driver_number"]):
+            continue
+        d = r.get("date")
+        if d and (("date>" in p and d <= p["date>"]) or ("date<" in p and d >= p["date<"])):
+            continue
+        out.append(r)
+    return out
+
+
+def use_snapshot():
+    global SNAP, SESSION, REPLAY
+    try:
+        with gzip.open("snapshot.json.gz", "rt") as f:
+            SNAP = json.load(f)
+    except OSError:
+        return False
+    SESSION, REPLAY = str(SNAP["session_key"]), True
+    _raw["key"] = None
+    state["fallback"] = True
+    log.warning("OpenF1 unavailable; replaying bundled snapshot of session %s", SESSION)
+    return True
+
+
 async def get(client, path, **params):
+    if SNAP is not None:
+        return local_get(path, params)
     headers = {"Authorization": f"Bearer {TOKEN}"} if TOKEN else {}
     for attempt in range(4):  
         r = await client.get(f"{OPENF1}/{path}", params=params, headers=headers, timeout=15)
@@ -176,7 +210,9 @@ async def poll_loop():
                         if await use_fallback(client):
                             continue
                     except Exception:
-                        log.exception("fallback failed")
+                        log.warning("latest-race fallback failed")
+                    if use_snapshot():
+                        continue
                 state["status"] = ("Live data needs an OpenF1 token (set OPENF1_TOKEN). Showing last known data."
                                    if code in (401, 402, 403) else f"OpenF1 error {code}; retrying")
                 log.exception(state["status"])
