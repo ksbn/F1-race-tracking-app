@@ -205,12 +205,13 @@ async def poll_loop():
                 state["updated"] = time.strftime("%H:%M:%S")
             except httpx.HTTPStatusError as e:
                 code = e.response.status_code
-                if code in (401, 402, 403) and not REPLAY:
-                    try:
-                        if await use_fallback(client):
-                            continue
-                    except Exception:
-                        log.warning("latest-race fallback failed")
+                if code in (401, 402, 403) and SNAP is None:
+                    if not REPLAY:
+                        try:
+                            if await use_fallback(client):
+                                continue
+                        except Exception:
+                            log.warning("latest-race fallback failed")
                     if use_snapshot():
                         continue
                 state["status"] = ("Live data needs an OpenF1 token (set OPENF1_TOKEN). Showing last known data."
