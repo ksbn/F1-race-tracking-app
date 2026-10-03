@@ -1,4 +1,3 @@
-cat > README.md <<'EOF'
 # F1 Live Tracker
 
 A full-stack Formula 1 race tracker in Python. It shows live timing, a track map, race control messages, weather, lap-time charts, standings and the calendar. When live data is unavailable, it replays a real race instead.
