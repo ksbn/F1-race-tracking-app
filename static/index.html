@@ -64,7 +64,7 @@ let S={rows:[]},OL=null,BB=null,K=1;
 const _r=render;render=function(s){S=s;_r(s);extra(s)};
 const pt=p=>[40+(p[0]-BB[0])*K,560-(p[1]-BB[2])*K];
 function extra(s){
-  if(s.replay)$("#sess").textContent+=" · Replay";
+  if(s.replay)$("#sess").textContent+=s.fallback?" · Replay of latest race (live feed unavailable)":" · Replay";
   const w=s.weather;$("#wx").textContent=w?`Air ${w.air_temperature}° · Track ${w.track_temperature}° · ${w.rainfall?"Rain":"Dry"}`:"";
   $("#rc").innerHTML=(s.messages||[]).slice(-8).reverse().map(m=>`<div class="m"><b>${esc(m.flag||m.category)}</b> ${esc(m.message)}</div>`).join("");
   if(s.has_outline&&!OL)loadOutline();

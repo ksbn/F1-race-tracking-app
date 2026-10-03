@@ -86,6 +86,20 @@ async def broadcast():
         clients.discard(ws)
 
 
+async def use_fallback(client):
+    """Live data is blocked (no token): switch to replaying the latest completed race."""
+    global SESSION, REPLAY
+    done = await get(client, "sessions", **{"date_end<": datetime.now(timezone.utc).isoformat()})
+    races = [s for s in done if s.get("session_name") == "Race"] or done
+    if not races:
+        return False
+    SESSION, REPLAY = str(max(races, key=lambda s: s["date_end"])["session_key"]), True
+    _raw["key"] = None  # forces a clean reset and a fresh replay clock
+    state["fallback"] = True
+    log.warning("live data blocked; replaying session %s", SESSION)
+    return True
+
+
 async def poll_loop():
     last_slow, t0 = 0, time.time()
     async with httpx.AsyncClient() as client:
@@ -157,6 +171,12 @@ async def poll_loop():
                 state["updated"] = time.strftime("%H:%M:%S")
             except httpx.HTTPStatusError as e:
                 code = e.response.status_code
+                if code in (401, 402, 403) and not REPLAY:
+                    try:
+                        if await use_fallback(client):
+                            continue
+                    except Exception:
+                        log.exception("fallback failed")
                 state["status"] = ("Live data needs an OpenF1 token (set OPENF1_TOKEN). Showing last known data."
                                    if code in (401, 402, 403) else f"OpenF1 error {code}; retrying")
                 log.exception(state["status"])
