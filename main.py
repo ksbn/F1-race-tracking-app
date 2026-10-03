@@ -50,7 +50,7 @@ def use_snapshot():
             SNAP = json.load(f)
     except OSError:
         return False
-    SESSION, REPLAY = str(SNAP["session_key"]), True
+    SESSION, REPLAY = str(SNAP["session_key"]), True # pyright: ignore[reportOptionalSubscript]
     _raw["key"] = None
     state["fallback"] = True
     log.warning("OpenF1 unavailable; replaying bundled snapshot of session %s", SESSION)
