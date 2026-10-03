@@ -13,6 +13,7 @@ def _q(sql, args=(), many=False, read=False):
 
 
 def init():
+    os.makedirs(os.path.dirname(os.path.abspath(PATH)), exist_ok=True)
     with closing(sqlite3.connect(PATH)) as c:
         c.executescript("""
 CREATE TABLE IF NOT EXISTS sessions(session_key INTEGER PRIMARY KEY, name TEXT, type TEXT, circuit TEXT, country TEXT, date_start TEXT);
