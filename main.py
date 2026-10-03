@@ -25,7 +25,7 @@ clients: set[WebSocket] = set()
 _cache: dict = {}
 
 
-SNAP = None  # bundled snapshot (dict), set when OpenF1 is unreachable
+SNAP: dict | None = None  # bundled snapshot (dict), set when OpenF1 is unreachable
 
 
 def local_get(path, p):
@@ -33,7 +33,7 @@ def local_get(path, p):
     if path == "location" and "driver_number" not in p:
         return []  # snapshots keep only the track outline, no live car positions
     out = []
-    for r in SNAP.get(path, []):
+    for r in (SNAP or {}).get(path, []):
         if "driver_number" in p and r.get("driver_number") != int(p["driver_number"]):
             continue
         d = r.get("date")
