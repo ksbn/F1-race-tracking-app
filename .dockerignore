@@ -1,6 +1,11 @@
-# flyctl launch added from .gitignore
+.git
 **/.venv
 **/__pycache__
+**/*.pyc
+.pytest_cache
 **/f1.db
 **/.env
-fly.toml
+.DS_Store
+tests
+README.md
+docker-compose.yml
