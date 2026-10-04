@@ -1,93 +1,81 @@
-# F1 Tracker
+# F1Tracker
 
-A full-stack Formula 1 race tracker in Python. It shows timing, a track map, race control messages, weather, lap-time charts, standings and the calendar. When live data is unavailable, it replays a real race instead.
+A full-stack Formula 1 race tracker in Python. It shows timing, a track map, race control messages, weather, lap-time charts, standings and the calendar. It has three data sources, so it keeps working when one of them is locked.
 
-Demo: https://f1-race-tracking-app-production.up.railway.app
+Demo: https://f1-race-tracking-app.onrender.com
 
-> **Note:** the demo may show a replay of a past race rather than live data. The header says "Replay of latest race (live feed unavailable)" when that happens. The hosting plan may also expire, so the link can go offline.
+> The demo runs on a free instance that sleeps when idle, so the first load can take up to a minute. A badge in the header says **Live**, **Finished** or **Waiting for session**, because outside a session the page shows the last state F1 sent.
 
 ## Features
 
 - **Timing tower:** position, gap, interval, last and best lap, tyre compound and age
-- **Track map:** cars moving on the circuit outline (needs OpenF1 data)
-- **Race control feed and weather:** flags, safety cars, penalties, temperatures, rain (needs OpenF1 data)
+- **Track map:** cars on a circuit outline built from live positions
+- **Race control feed and weather:** flags, safety cars, penalties, temperatures, rain
 - **Lap-time chart:** one line per driver, stored in SQLite
-- **Standings and calendar:** current season
-- **Replay mode:** play back any finished session at adjustable speed
-- **Automatic fallback:** if live data is blocked, the app replays the latest race, or a bundled snapshot if the API is unreachable
+- **Standings and calendar:** current season, from Jolpica-F1
+- **Status badge:** shows whether the session is live, finished, waiting or a replay
+- **Replay mode:** play back a finished race from OpenF1 or a bundled snapshot
 
-## Stack
+## Data sources
 
-- **Backend:** FastAPI, httpx, WebSockets, SQLite
-- **Frontend:** a single HTML page with vanilla JS and inline SVG
-- **Data:** [OpenF1](https://openf1.org) for timing data, [Jolpica-F1](https://github.com/jolpica/jolpica-f1) for standings, the calendar and snapshots
-- **Deploy:** Docker, Railway
+| Source | How to enable | Notes |
+|---|---|---|
+| F1 live timing stream (**experimental**) | `SOURCE=f1stream` | Free, no key. Unofficial and undocumented. It can break without notice, and F1's terms of use for a public site have not been checked. |
+| OpenF1 | default | Historical data is free. Live data needs a paid account. While a session is live, the free API is locked. |
+| Snapshot replay | `USE_SNAPSHOT=1` or automatic fallback | Replays the bundled `snapshot.json.gz`. No network needed. |
+
+Standings and the calendar come from [Jolpica-F1](https://github.com/jolpica/jolpica-f1), which needs no key.
 
 ## How it works
 
-A background task polls OpenF1 and fetches only records newer than the last one seen. It keeps one shared in-memory state and pushes it to every browser over `/ws`. Laps are saved to SQLite for the charts.
+A background task reads the chosen source and keeps one shared in-memory state. It pushes that state to every browser over `/ws`. Laps are saved to SQLite for the charts.
 
-OpenF1 restricts all access, including past sessions, to authenticated users while a live F1 session is running, and live data needs a paid account. The app handles this with a fallback chain:
-
-1. Live data from OpenF1
-2. If access is refused: replay the latest completed race fetched from OpenF1
-3. If that is refused too: replay the bundled `snapshot.json.gz`
-
-Once the app falls back, it stays on the replay until it is restarted.
+With the default source, if OpenF1 refuses access, the app replays the latest completed race from OpenF1, and if that is refused too, the bundled snapshot. Once the app falls back, it stays on the replay until it restarts. `SOURCE=f1stream` has no fallback.
 
 ## Run locally
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-POLL_SECONDS=20 uvicorn main:app
+SOURCE=f1stream uvicorn main:app
 ```
 
-Open http://localhost:8000.
+Open http://localhost:8000. Without `SOURCE`, the app uses OpenF1 (`POLL_SECONDS=20` avoids rate limits).
 
 ### Replay a past session
-
-Find a session key, then start in replay mode:
 
 ```bash
 curl -s "https://api.openf1.org/v1/sessions?year=2025&session_name=Race"
 REPLAY_SESSION=<session_key> REPLAY_SPEED=5 uvicorn main:app
 ```
 
-### Docker
-
-```bash
-docker compose up --build
-```
-
 ## Snapshots
-
-The fallback replays `snapshot.json.gz` from the project root. Create it with one of two scripts:
 
 ```bash
 python3 snapshot.py              # from OpenF1: tyres, weather, race control, track outline
 python3 snapshot_jolpica.py      # from Jolpica: positions, lap times, derived gaps
 ```
 
-`snapshot.py` only works while OpenF1 allows access. `snapshot_jolpica.py` has no live-session lockouts, but it has no tyres, weather, race control messages or track outline. Both accept a specific race (`python3 snapshot_jolpica.py 2026 15`) or default to the latest one.
-
-On macOS with a python.org install, run `Install Certificates.command` once if you get an SSL certificate error.
+Both write `snapshot.json.gz` and overwrite the existing one. `snapshot.py` only works while OpenF1 allows access. On macOS with a python.org install, run `Install Certificates.command` once if you get an SSL certificate error.
 
 ## Configuration
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `POLL_SECONDS` | `4` | Seconds between polls. Use 20 or more to avoid 429 errors. |
-| `OPENF1_TOKEN` | none | Optional OpenF1 token for real-time data |
-| `REPLAY_SESSION` | `latest` | A session key forces replay of that OpenF1 session |
+| `SOURCE` | none | `f1stream` uses F1's live timing stream instead of OpenF1 |
+| `USE_SNAPSHOT` | none | Replay the bundled snapshot without calling OpenF1 |
+| `REPLAY_SESSION` | `latest` | Force replay of a specific OpenF1 session |
 | `REPLAY_SPEED` | `5` | Replay speed multiplier |
+| `REPLAY_FINAL` | none | Freeze the replay at the end of the race |
+| `POLL_SECONDS` | `4` | Seconds between OpenF1 polls. Use 20 or more to avoid 429 errors. |
+| `OPENF1_TOKEN` | none | Optional OpenF1 token for real-time data |
 | `DB_PATH` | `f1.db` | SQLite file location. Falls back to `/tmp` if not writable. |
 
 ## API
 
 | Endpoint | Description |
 |---|---|
-| `GET /health` | Status of the poller |
+| `GET /health` | Status of the data source |
 | `GET /api/state` | Current timing state |
 | `GET /api/laps` | Stored lap times for a session |
 | `GET /api/outline` | Track outline points |
@@ -103,13 +91,24 @@ pip install pytest
 pytest tests
 ```
 
+## Deploy
+
+The repo includes a `Dockerfile` that reads the `PORT` variable, so it runs on Render, Railway and similar hosts.
+
+**Render (free tier):**
+1. New Web Service, connect the repo, language **Docker**, instance type **Free**.
+2. Health check path `/health`.
+3. Environment variable `SOURCE=f1stream`.
+
+Keep a single instance. State lives in memory, and free instances have no disk, so lap history resets on every restart.
+
 ## Limitations
 
-- Real-time OpenF1 data needs a paid account. During live sessions the free API is locked, so the app shows a replay.
+- The F1 live stream is unofficial and untested during a live race weekend. Its field names follow open-source projects and may need fixes.
+- Real-time OpenF1 data needs a paid account, and its free API locks while a session is live.
 - Snapshots from Jolpica have no tyres, weather, race control or track map, and their gaps are derived from lap times.
-- The replay clock is shared by all viewers and restarts from the race start whenever the app restarts.
+- The replay clock is shared by all viewers and restarts when the app restarts.
 - Single process only. Scaling out needs shared state, for example Redis pub/sub.
-- Race control messages and weather are not persisted.
 
 ## License
 
