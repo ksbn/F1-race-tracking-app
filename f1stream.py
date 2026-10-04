@@ -99,6 +99,11 @@ class Feed:
         return {"session_name": i.get("Name"), "session_type": i.get("Type"), "date_start": None, "date_end": None,
                 "circuit_short_name": mt.get("Circuit", {}).get("ShortName"), "country_name": mt.get("Country", {}).get("Name")}
 
+    def live(self):  # label for the page badge, from F1's own session status
+        st = self.s.get("SessionStatus", {}).get("Status")
+        return {"Started": "Live", "Finished": "Finished", "Finalized": "Finished", "Ends": "Finished",
+                "Inactive": "Waiting for session", "Aborted": "Suspended"}.get(st)
+
     def key(self):
         return int(self.s.get("SessionInfo", {}).get("Key") or 0)
 
@@ -124,7 +129,8 @@ async def stream(feed, push):
                 delay, last = 2, 0
                 async for raw in ws:
                     force = False
-                    for part in filter(None, raw.split("\x1e")):
+                    text = raw.decode() if isinstance(raw, bytes) else raw  # frames may arrive as bytes or text
+                    for part in filter(None, text.split("\x1e")):
                         m = json.loads(part)
                         if m.get("type") == 6:
                             await ws.send('{"type":6}\x1e')
@@ -153,7 +159,7 @@ async def run(state, raw, broadcast, db):
         nonlocal saved
         rows = feed.rows()
         state.update(rows=rows, cars=feed.cars, messages=feed.messages(), weather=feed.weather(), session=feed.session(),
-                     replay=False, fallback=False, has_outline=len(feed.outline) >= 400, updated=time.strftime("%H:%M:%S"),
+                     replay=False, fallback=False, live=feed.live(), has_outline=len(feed.outline) >= 400, updated=time.strftime("%H:%M:%S"),
                      status=status or ("ok" if rows else "Connected to F1 live timing; waiting for a session"))
         raw.update(outline=feed.outline, key=feed.key() or None)
         if raw["key"] and time.time() - saved > 30 and feed.laps:

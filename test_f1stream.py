@@ -13,7 +13,7 @@ def test_feed_builds_rows_cars_and_messages():
     f.apply("DriverList", {"1": {"Tla": "VER", "FullName": "Max V", "TeamName": "RB", "TeamColour": "3671C6"}, "4": {"Tla": "NOR"}})
     f.apply("TimingData", {"Lines": {"1": {"Position": "2", "GapToLeader": "+1.5", "IntervalToPositionAhead": {"Value": "+1.5"},
             "LastLapTime": {"Value": "1:35.250"}, "NumberOfLaps": 3}, "4": {"Position": "1", "GapToLeader": ""}}})
-    f.apply("TimingData", {"Lines": {"1": {"BestLapTime": {"Value": "1:34.000"}}}})  # partial update merges
+    f.apply("TimingData", {"Lines": {"1": {"BestLapTime": {"Value": "1:34.000"}}}})  
     f.apply("TimingAppData", {"Lines": {"1": {"Stints": [{"Compound": "SOFT", "TotalLaps": 3}]}}})
     f.apply("RaceControlMessages", {"Messages": [{"Flag": "GREEN", "Category": "Flag", "Message": "GREEN LIGHT"}]})
     f.apply("Position.z", z({"Position": [{"Entries": {"1": {"Status": "OnTrack", "X": 10, "Y": 20, "Z": 0}}}]}))
@@ -21,3 +21,12 @@ def test_feed_builds_rows_cars_and_messages():
     assert [x["code"] for x in r] == [None if False else "NOR", "VER"]
     assert r[1]["gap"] == 1.5 and r[1]["last"] == 95.25 and r[1]["best"] == 94.0 and r[1]["tyre"] == "SOFT"
     assert f.cars == {"1": [10, 20]} and f.messages()[0]["flag"] == "GREEN" and f.lap_rows()[1][0]["lap_number"] == 3
+
+
+def test_live_badge_labels():
+    f = Feed()
+    assert f.live() is None
+    f.apply("SessionStatus", {"Status": "Started"})
+    assert f.live() == "Live"
+    f.apply("SessionStatus", {"Status": "Finalized"})
+    assert f.live() == "Finished"
