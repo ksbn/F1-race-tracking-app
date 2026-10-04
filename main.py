@@ -172,12 +172,17 @@ async def poll_loop():
                     if c["x"] or c["y"]:
                         state["cars"][c["driver_number"]] = [c["x"], c["y"]]
 
-                if time.time() - last_slow > 60: 
+                if time.time() - last_slow > (0 if SNAP is not None else 60): 
                     last_slow = time.time()
                     by_driver: dict = {}
                     for l in await get(client, "laps", session_key=_raw["key"]):
-                        if not REPLAY or (l.get("date_start") or "") <= upper:
-                            by_driver.setdefault(l["driver_number"], []).append(l)
+                        if REPLAY:
+                            ds = l.get("date_start") or ""
+                            if ds > upper:
+                                continue
+                            if ds and l.get("lap_duration") and datetime.fromisoformat(ds) + timedelta(seconds=l["lap_duration"]) > now:
+                                l = {**l, "lap_duration": None}  # lap still in progress at the replay clock
+                        by_driver.setdefault(l["driver_number"], []).append(l)
                     _raw["laps"] = {k: sorted(v, key=lambda l: l["lap_number"]) for k, v in by_driver.items()}
                     await asyncio.to_thread(db.save_laps, _raw["key"], _raw["laps"])
                     for s in await get(client, "stints", session_key=_raw["key"]):
@@ -227,6 +232,8 @@ async def poll_loop():
 @asynccontextmanager
 async def lifespan(app):
     db.init()
+    if os.getenv("USE_SNAPSHOT"):
+        use_snapshot()
     task = asyncio.create_task(poll_loop())
     yield
     task.cancel()
