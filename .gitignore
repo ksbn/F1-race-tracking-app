@@ -2,3 +2,6 @@
 __pycache__
 f1.db
 .env
+.pytest_cache/
+.DS_Store
+*.pyc
