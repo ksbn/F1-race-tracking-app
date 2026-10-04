@@ -234,7 +234,11 @@ async def lifespan(app):
     db.init()
     if os.getenv("USE_SNAPSHOT"):
         use_snapshot()
-    task = asyncio.create_task(poll_loop())
+    if os.getenv("SOURCE") == "f1stream":  # experimental: F1's own live timing stream
+        import f1stream
+        task = asyncio.create_task(f1stream.run(state, _raw, broadcast, db))
+    else:
+        task = asyncio.create_task(poll_loop())
     yield
     task.cancel()
 
