@@ -236,7 +236,7 @@ async def lifespan(app):
         use_snapshot()
     if os.getenv("SOURCE") == "f1stream":  # experimental: F1's own live timing stream
         import f1stream
-        task = asyncio.create_task(f1stream.run(state, _raw, broadcast, db))
+        task = asyncio.create_task(f1stream.run(state, _raw, broadcast, db, lambda: snap_matches() and bool(snap_file().get("location"))))
     else:
         task = asyncio.create_task(poll_loop())
     yield
@@ -284,14 +284,43 @@ async def health():
     return {"ok": True, "status": state["status"], "updated": state["updated"], "replay": REPLAY}
 
 
+_snap_cache: dict = {}
+
+
+def snap_file():
+    if "d" not in _snap_cache:
+        try:
+            with gzip.open("snapshot.json.gz", "rt") as f:
+                _snap_cache["d"] = json.load(f)
+        except OSError:
+            _snap_cache["d"] = {}
+    return _snap_cache["d"]
+
+
+def snap_matches():
+    """True when the bundled snapshot is of the session the F1 stream is currently showing."""
+    s = (snap_file().get("sessions") or [{}])[0]
+    cur = state.get("session") or {}
+    return bool(s) and s.get("country_name") == cur.get("country_name") and s.get("session_name") == cur.get("session_name")
+
+
 @app.get("/api/laps")
 async def api_laps(session_key: int | None = None):
-    return await asyncio.to_thread(db.laps, session_key or _raw["key"])
+    data = await asyncio.to_thread(db.laps, session_key or _raw["key"])
+    if not data and os.getenv("SOURCE") == "f1stream" and snap_matches():  # stream has no lap history
+        for l in snap_file().get("laps", []):
+            if l.get("lap_duration"):
+                data.setdefault(l["driver_number"], []).append([l["lap_number"], l["lap_duration"]])
+        data = {k: sorted(v) for k, v in data.items()}
+    return data
 
 
 @app.get("/api/outline")
 async def api_outline():
-    return _raw.get("outline") or []
+    out = _raw.get("outline") or []
+    if len(out) < 400 and os.getenv("SOURCE") == "f1stream" and snap_matches():  # same session: reuse its circuit outline
+        out = [[p["x"], p["y"]] for p in snap_file().get("location", [])]
+    return out
 
 
 @app.get("/api/sessions")

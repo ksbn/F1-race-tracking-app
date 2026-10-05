@@ -152,14 +152,14 @@ async def stream(feed, push):
         delay = min(delay * 2, 60)
 
 
-async def run(state, raw, broadcast, db):
+async def run(state, raw, broadcast, db, extra_outline=None):
     feed, saved = Feed(), 0
 
     async def push(status=None):
         nonlocal saved
         rows = feed.rows()
         state.update(rows=rows, cars=feed.cars, messages=feed.messages(), weather=feed.weather(), session=feed.session(),
-                     replay=False, fallback=False, live=feed.live(), has_outline=len(feed.outline) >= 400, updated=time.strftime("%H:%M:%S"),
+                     replay=False, fallback=False, live=feed.live(), has_outline=len(feed.outline) >= 400 or bool(extra_outline and extra_outline()), updated=time.strftime("%H:%M:%S"),
                      status=status or ("ok" if rows else "Connected to F1 live timing; waiting for a session"))
         raw.update(outline=feed.outline, key=feed.key() or None)
         if raw["key"] and time.time() - saved > 30 and feed.laps:
