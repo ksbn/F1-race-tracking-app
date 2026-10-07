@@ -307,11 +307,15 @@ def snap_matches():
 @app.get("/api/laps")
 async def api_laps(session_key: int | None = None):
     data = await asyncio.to_thread(db.laps, session_key or _raw["key"])
-    if not data and os.getenv("SOURCE") == "f1stream" and snap_matches():  # stream has no lap history
+    if os.getenv("SOURCE") == "f1stream" and snap_matches():  # stream keeps no lap history: start from the snapshot
+        merged: dict = {}
         for l in snap_file().get("laps", []):
             if l.get("lap_duration"):
-                data.setdefault(l["driver_number"], []).append([l["lap_number"], l["lap_duration"]])
-        data = {k: sorted(v) for k, v in data.items()}
+                merged.setdefault(int(l["driver_number"]), {})[l["lap_number"]] = l["lap_duration"]
+        for d, ls in data.items():  # then add any laps the stream recorded that the snapshot lacks
+            for lap, dur in ls:
+                merged.setdefault(int(d), {}).setdefault(lap, dur)
+        data = {d: [[k, v] for k, v in sorted(laps.items())] for d, laps in merged.items()}
     return data
 
 
