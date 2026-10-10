@@ -87,7 +87,7 @@ async function drawChart(){
   const t=ls.map(l=>l[1]).sort((a,b)=>a-b),lo=t[0],hi=Math.max(t[t.length>>1]*1.1,lo+1),mx=Math.max(...ls.map(l=>l[0]),2);
   const X=l=>50+(l-1)/(mx-1)*720,Y=v=>270-(Math.min(v,hi)-lo)/(hi-lo)*240;
   $("#chart").innerHTML=`<svg viewBox="0 0 800 300" role="img" aria-label="Lap times per driver" fill="currentColor" font-size="12">`+
-   Object.entries(d).map(([n,a])=>`<polyline fill="none" stroke="${esc((by[n]||{}).colour||"#888")}" stroke-width="2" points="${a.map(l=>X(l[0])+","+Y(l[1])).join(" ")}"><title>${esc((by[n]||{}).code||n)}</title></polyline>`).join("")+
+   Object.entries(d).map(([n,a])=>`<polyline fill="none" stroke="${esc((by[n]||{}).colour||"#888")}" stroke-width="2" points="${a.map(l=>X(l[0])+","+Y(l[1])).join(" ")}"><title>${esc((by[n]||{}).code||n)}</title></polyline>${a.map(l=>`<circle cx="${X(l[0])}" cy="${Y(l[1])}" r="3" fill="${esc((by[n]||{}).colour||"#888")}"/>`).join("")}`).join("")+
    `<text x="4" y="34">${lap(lo)}</text><text x="4" y="274">${lap(hi)}</text><text x="50" y="294">Lap 1</text><text x="740" y="294">Lap ${mx}</text></svg>`;
 }
 setInterval(()=>{if(!$("#chart").classList.contains("hide"))drawChart()},15000);

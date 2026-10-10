@@ -62,6 +62,11 @@ class Feed:
         if topic == "SessionInfo" and data.get("Key") not in (None, self.cur_key):
             if self.cur_key is not None:  # a new session started: drop laps, cars and outline of the previous one
                 self.laps, self.cars, self.outline, self._ref = {}, {}, [], None
+                for l in self.s.get("TimingData", {}).get("Lines", {}).values():  # stale lap data of the old session
+                    for k in ("LastLapTime", "BestLapTime", "BestLapTimes", "NumberOfLaps"):
+                        l.pop(k, None)
+                for l in self.s.get("TimingAppData", {}).get("Lines", {}).values():
+                    l.pop("Stints", None)
             self.cur_key = data["Key"]
         if topic == "Position.z":
             for frame in data.get("Position", {}).values():
@@ -90,8 +95,8 @@ class Feed:
             if last and l.get("NumberOfLaps"):
                 self.laps.setdefault(int(n), {})[int(l["NumberOfLaps"])] = last
             out.append({"pos": pos, "num": int(n), "code": d.get("Tla"), "name": d.get("FullName"), "team": d.get("TeamName"),
-                        "colour": "#" + (d.get("TeamColour") or "888888"), "gap": num(l.get("GapToLeader")),
-                        "interval": num((l.get("IntervalToPositionAhead") or {}).get("Value")),
+                        "colour": "#" + (d.get("TeamColour") or "888888"), "gap": num(l.get("GapToLeader") or l.get("TimeDiffToFastest")),
+                        "interval": num((l.get("IntervalToPositionAhead") or {}).get("Value") or l.get("TimeDiffToPositionAhead")),
                         "lap": l.get("NumberOfLaps"), "last": last, "best": secs((l.get("BestLapTime") or {}).get("Value")),
                         "tyre": st.get("Compound"), "tyre_age": st.get("TotalLaps")})
         return sorted(out, key=lambda r: r["pos"])
