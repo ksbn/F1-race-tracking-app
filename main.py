@@ -236,7 +236,7 @@ async def lifespan(app):
         use_snapshot()
     if os.getenv("SOURCE") == "f1stream":  # experimental: F1's own live timing stream
         import f1stream
-        task = asyncio.create_task(f1stream.run(state, _raw, broadcast, db, lambda: snap_matches() and bool(snap_file().get("location"))))
+        task = asyncio.create_task(f1stream.run(state, _raw, broadcast, db, lambda: bool(circuit_file()) or (snap_matches() and bool(snap_file().get("location")))))
     else:
         task = asyncio.create_task(poll_loop())
     yield
@@ -304,6 +304,16 @@ def snap_matches():
     return bool(s) and s.get("country_name") == cur.get("country_name") and s.get("session_name") == cur.get("session_name")
 
 
+def circuit_file():
+    """Saved outline for the current circuit: circuits/<circuit-short-name>.json, e.g. circuits/kuala-lumpur.json."""
+    name = ((state.get("session") or {}).get("circuit_short_name") or "").strip().lower().replace(" ", "-")
+    path = os.path.join("circuits", f"{name}.json")
+    if name and os.path.exists(path):
+        with open(path) as f:
+            return json.load(f)
+    return []
+
+
 @app.get("/api/laps")
 async def api_laps(session_key: int | None = None):
     data = await asyncio.to_thread(db.laps, session_key or _raw["key"])
@@ -322,6 +332,8 @@ async def api_laps(session_key: int | None = None):
 @app.get("/api/outline")
 async def api_outline():
     out = _raw.get("outline") or []
+    if len(out) < 400:
+        out = circuit_file() or out
     if len(out) < 400 and os.getenv("SOURCE") == "f1stream" and snap_matches():  # same session: reuse its circuit outline
         out = [[p["x"], p["y"]] for p in snap_file().get("location", [])]
     return out

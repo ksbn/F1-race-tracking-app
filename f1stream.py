@@ -45,6 +45,7 @@ def num(s):  # "+1.234" -> 1.234 ; "1L" stays text ; "" -> None
 class Feed:
     def __init__(self):
         self.s, self.cars, self.outline, self.laps, self._ref = {}, {}, [], {}, None
+        self.cur_key = None
         self.seen, self.sample, self.err = {}, None, None  # diagnostics: topics received, a Position.z sample, last decode error
 
     def apply(self, topic, data):
@@ -58,6 +59,10 @@ class Feed:
             if self.sample is None:
                 self.sample = json.dumps(data)[:400]
         data = norm(data)
+        if topic == "SessionInfo" and data.get("Key") not in (None, self.cur_key):
+            if self.cur_key is not None:  # a new session started: drop laps, cars and outline of the previous one
+                self.laps, self.cars, self.outline, self._ref = {}, {}, [], None
+            self.cur_key = data["Key"]
         if topic == "Position.z":
             for frame in data.get("Position", {}).values():
                 for n, e in frame.get("Entries", {}).items():
