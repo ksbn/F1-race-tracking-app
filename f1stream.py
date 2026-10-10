@@ -139,8 +139,10 @@ async def stream(feed, push):
                 await ws.recv()
                 await ws.send(json.dumps({"arguments": [TOPICS], "invocationId": "1", "target": "Subscribe", "type": 1}) + "\x1e")
                 log.info("subscribed to F1 live timing")
-                delay, last = 2, 0
+                delay, last, started = 2, 0, time.time()
                 async for raw in ws:
+                    if time.time() - started > 600:  # reconnect every 10 minutes to pick up a new session
+                        break
                     force = False
                     text = raw.decode() if isinstance(raw, bytes) else raw  # frames may arrive as bytes or text
                     for part in filter(None, text.split("\x1e")):
