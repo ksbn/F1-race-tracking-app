@@ -1,5 +1,3 @@
-"""Save one finished session to snapshot.json.gz so the app can replay it when OpenF1 blocks access.
-Usage: python3 snapshot.py [session_key]     (default: latest completed Race)"""
 import gzip, json, sys, time, urllib.error, urllib.parse, urllib.request
 from datetime import datetime, timedelta, timezone
 

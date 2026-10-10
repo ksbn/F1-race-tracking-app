@@ -45,10 +45,18 @@ def num(s):  # "+1.234" -> 1.234 ; "1L" stays text ; "" -> None
 class Feed:
     def __init__(self):
         self.s, self.cars, self.outline, self.laps, self._ref = {}, {}, [], {}, None
+        self.seen, self.sample, self.err = {}, None, None  # diagnostics: topics received, a Position.z sample, last decode error
 
     def apply(self, topic, data):
+        self.seen[topic] = self.seen.get(topic, 0) + 1
         if topic.endswith(".z"):
-            data = json.loads(zlib.decompress(base64.b64decode(data), -zlib.MAX_WBITS))
+            try:
+                data = json.loads(zlib.decompress(base64.b64decode(data), -zlib.MAX_WBITS))
+            except Exception as e:  # a bad frame must not drop the whole connection
+                self.err = f"{topic}: {type(e).__name__}: {e}"
+                return
+            if self.sample is None:
+                self.sample = json.dumps(data)[:400]
         data = norm(data)
         if topic == "Position.z":
             for frame in data.get("Position", {}).values():
@@ -159,7 +167,7 @@ async def run(state, raw, broadcast, db, extra_outline=None):
         nonlocal saved
         rows = feed.rows()
         state.update(rows=rows, cars=feed.cars, messages=feed.messages(), weather=feed.weather(), session=feed.session(),
-                     replay=False, fallback=False, live=feed.live(), has_outline=len(feed.outline) >= 400 or bool(extra_outline and extra_outline()), updated=time.strftime("%H:%M:%S"),
+                     replay=False, fallback=False, live=feed.live(), debug={"topics": feed.seen, "pos_sample": feed.sample, "error": feed.err}, has_outline=len(feed.outline) >= 400 or bool(extra_outline and extra_outline()), updated=time.strftime("%H:%M:%S"),
                      status=status or ("ok" if rows else "Connected to F1 live timing; waiting for a session"))
         raw.update(outline=feed.outline, key=feed.key() or None)
         if raw["key"] and time.time() - saved > 30 and feed.laps:
