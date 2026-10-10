@@ -46,6 +46,7 @@ class Feed:
     def __init__(self):
         self.s, self.cars, self.outline, self.laps, self._ref = {}, {}, [], {}, None
         self.cur_key = None
+        self._seen = {}
         self.seen, self.sample, self.err = {}, None, None  # diagnostics: topics received, a Position.z sample, last decode error
 
     def apply(self, topic, data):
@@ -62,6 +63,7 @@ class Feed:
         if topic == "SessionInfo" and data.get("Key") not in (None, self.cur_key):
             if self.cur_key is not None:  # a new session started: drop laps, cars and outline of the previous one
                 self.laps, self.cars, self.outline, self._ref = {}, {}, [], None
+                self._seen = {}
                 for l in self.s.get("TimingData", {}).get("Lines", {}).values():  # stale lap data of the old session
                     for k in ("LastLapTime", "BestLapTime", "BestLapTimes", "NumberOfLaps"):
                         l.pop(k, None)
@@ -93,7 +95,12 @@ class Feed:
             st = stints[max(stints, key=int)] if stints else {}
             last = secs((l.get("LastLapTime") or {}).get("Value"))
             if last and l.get("NumberOfLaps"):
-                self.laps.setdefault(int(n), {})[int(l["NumberOfLaps"])] = last
+                mine = self.laps.setdefault(int(n), {})
+                if self.s.get("SessionInfo", {}).get("Type") not in ("Practice", "Qualifying"):  # races: F1's own lap counter
+                    mine[int(l["NumberOfLaps"])] = last
+                elif self._seen.get(n) != (l["NumberOfLaps"], last):  # practice/qualifying: number the timed laps 1, 2, 3...
+                    self._seen[n] = (l["NumberOfLaps"], last)
+                    mine[len(mine) + 1] = last
             out.append({"pos": pos, "num": int(n), "code": d.get("Tla"), "name": d.get("FullName"), "team": d.get("TeamName"),
                         "colour": "#" + (d.get("TeamColour") or "888888"), "gap": num(l.get("GapToLeader") or l.get("TimeDiffToFastest")),
                         "interval": num((l.get("IntervalToPositionAhead") or {}).get("Value") or l.get("TimeDiffToPositionAhead")),
