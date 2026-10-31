@@ -46,6 +46,7 @@ class Feed:
     def __init__(self):
         self.s, self.cars, self.outline, self.laps, self._ref = {}, {}, [], {}, None
         self.cur_key = None
+        self.refresh = False
         self._seen = {}
         self.seen, self.sample, self.err = {}, None, None  # diagnostics: topics received, a Position.z sample, last decode error
 
@@ -64,11 +65,9 @@ class Feed:
             if self.cur_key is not None:  # a new session started: drop laps, cars and outline of the previous one
                 self.laps, self.cars, self.outline, self._ref = {}, {}, [], None
                 self._seen = {}
-                for l in self.s.get("TimingData", {}).get("Lines", {}).values():  # stale lap data of the old session
-                    for k in ("LastLapTime", "BestLapTime", "BestLapTimes", "NumberOfLaps"):
-                        l.pop(k, None)
-                for l in self.s.get("TimingAppData", {}).get("Lines", {}).values():
-                    l.pop("Stints", None)
+                for name in ("TimingData", "TimingAppData", "DriverList", "RaceControlMessages"):
+                    self.s.pop(name, None)  # drivers and messages of the old session
+                self.refresh = True  # reconnect so F1 resends the full state for the new session
             self.cur_key = data["Key"]
         if topic == "Position.z":
             for frame in data.get("Position", {}).values():
@@ -106,7 +105,11 @@ class Feed:
                         "interval": num((l.get("IntervalToPositionAhead") or {}).get("Value") or l.get("TimeDiffToPositionAhead")),
                         "lap": l.get("NumberOfLaps"), "last": last, "best": secs((l.get("BestLapTime") or {}).get("Value")),
                         "tyre": st.get("Compound"), "tyre_age": st.get("TotalLaps")})
-        return sorted(out, key=lambda r: r["pos"])
+        out.sort(key=lambda r: r["pos"])
+        if len({r["pos"] for r in out}) != len(out):  # never show duplicate positions
+            for i, r in enumerate(out, 1):
+                r["pos"] = i
+        return out
 
     def messages(self):
         m = self.s.get("RaceControlMessages", {}).get("Messages", {})
@@ -162,11 +165,16 @@ async def stream(feed, push):
                         if m.get("type") == 6:
                             await ws.send('{"type":6}\x1e')
                         elif m.get("type") == 3 and isinstance(m.get("result"), dict):
-                            for topic, data in m["result"].items():
+                            feed.s = {}  # a full state replaces what we had, so drivers of earlier sessions disappear
+                            for topic, data in sorted(m["result"].items(), key=lambda kv: kv[0] != "SessionInfo"):
                                 feed.apply(topic, data)
+                            feed.refresh = False
                             force = True
                         elif m.get("type") == 1 and m.get("target") == "feed":
                             feed.apply(m["arguments"][0], m["arguments"][1])
+                    if feed.refresh:
+                        feed.refresh = False
+                        break
                     if force or time.time() - last >= 1:  # at most one browser update per second
                         last = time.time()
                         await push()
