@@ -346,10 +346,10 @@ async def api_laps(session_key: int | None = None):
 
 @app.get("/api/outline")
 async def api_outline():
-    out = _raw.get("outline") or []
+    out = circuit_file() or []
     if len(out) < 400:
-        out = circuit_file() or out
-    if len(out) < 400 and os.getenv("SOURCE") == "f1stream" and snap_matches():  # same session: reuse its circuit outline
+        out = _raw.get("outline") or out
+    if len(out) < 400 and snap_matches():
         out = [[p["x"], p["y"]] for p in snap_file().get("location", [])]
     return out
 
