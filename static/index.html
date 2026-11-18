@@ -68,7 +68,7 @@ function extra(s){
   if(s.replay)$("#sess").textContent+=s.fallback?" · Replay of latest race (live feed unavailable)":" · Replay";
   const w=s.weather;$("#wx").textContent=w?`Air ${w.air_temperature}° · Track ${w.track_temperature}° · ${w.rainfall?"Rain":"Dry"}`:"";
   $("#rc").innerHTML=(s.messages||[]).slice(-8).reverse().map(m=>`<div class="m"><b>${esc(m.flag||m.category)}</b> ${esc(m.message)}</div>`).join("");
-  if(s.has_outline&&!OL)loadOutline();
+ if(!OL)loadOutline(); // Fetch outline regardless of s.has_outline flag
   drawCars(s);
 }
 async function loadOutline(){
