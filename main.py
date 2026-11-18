@@ -105,7 +105,12 @@ def build_rows():
             "tyre_age": (stint.get("tyre_age_at_start") or 0) + (
                 (max((l["lap_number"] for l in laps), default=0) - (stint["lap_start"] or 0)) if stint else 0) if stint else None,
         })
-    rows.sort(key=lambda r: r["pos"])
+    
+    rows.sort(key=lambda r: (r.get("pos", 99) or 99, r.get("num", 0)))
+    
+    for i, r in enumerate(rows):
+        r["pos"] = i + 1
+        
     return rows
 
 
@@ -305,14 +310,24 @@ def snap_matches():
 
 
 def circuit_file():
-    """Saved outline for the current circuit: circuits/<circuit-short-name>.json, e.g. circuits/kuala-lumpur.json."""
-    name = ((state.get("session") or {}).get("circuit_short_name") or "").strip().lower().replace(" ", "-")
+    """Saved outline for the current circuit with robust fallbacks."""
+    session_info = state.get("session") or {}
+    name = (session_info.get("circuit_short_name") or "").strip().lower().replace(" ", "-")
+    
     path = os.path.join("circuits", f"{name}.json")
     if name and os.path.exists(path):
         with open(path) as f:
             return json.load(f)
+            
+    # Fallback: if exact match isn't found or session isn't loaded, pick any available circuit file
+    if os.path.exists("circuits"):
+        files = [f for f in os.listdir("circuits") if f.endswith(".json")]
+        if files:
+            fallback_path = os.path.join("circuits", files[0])
+            with open(fallback_path) as f:
+                return json.load(f)
+                
     return []
-
 
 @app.get("/api/laps")
 async def api_laps(session_key: int | None = None):
