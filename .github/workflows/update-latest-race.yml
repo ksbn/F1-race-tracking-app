@@ -1,0 +1,73 @@
+name: Update latest race
+
+# After each race weekend, refresh snapshot.json.gz and add the circuit outline if it is missing,
+# so the app's fallback replay and track map show the most recent race.
+on:
+  schedule:
+    - cron: "0 12 * * 1"  # Mondays 12:00 UTC, after Sunday races (and Saturday-night races like Las Vegas)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-latest-race
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Find the latest completed race
+        id: race
+        run: |
+          python3 - <<'EOF' >> "$GITHUB_OUTPUT"
+          import gzip, json, time, urllib.request, urllib.error
+          from datetime import datetime, timezone
+          url = "https://api.openf1.org/v1/sessions?session_name=Race&date_end%3C=" + datetime.now(timezone.utc).isoformat()
+          for i in range(6):
+              try:
+                  races = json.load(urllib.request.urlopen(url, timeout=90))
+                  break
+              except urllib.error.HTTPError as e:
+                  if e.code != 429:
+                      raise
+                  time.sleep(2 ** i)
+          latest = max(races, key=lambda s: s["date_end"])
+          with gzip.open("snapshot.json.gz", "rt") as f:
+              current = json.load(f).get("session_key")
+          print(f"key={latest['session_key']}")
+          print(f"circuit={latest['circuit_short_name']}")
+          print(f"slug={latest['circuit_short_name'].lower().replace(' ', '-')}")
+          print(f"name={latest.get('location')} {latest.get('year')}")
+          print(f"new={'true' if latest['session_key'] != current else 'false'}")
+          EOF
+          cat "$GITHUB_OUTPUT"
+
+      - name: Regenerate snapshot
+        if: steps.race.outputs.new == 'true'
+        run: python3 snapshot.py "${{ steps.race.outputs.key }}"
+
+      - name: Add circuit outline if missing
+        if: hashFiles(format('circuits/{0}.json', steps.race.outputs.slug)) == ''
+        run: |
+          sleep 60  # stay under OpenF1's 30 requests/minute after the snapshot
+          python3 circuit_outline.py "${{ steps.race.outputs.circuit }}" "${{ steps.race.outputs.key }}"
+
+      - name: Commit changes
+        run: |
+          git add snapshot.json.gz circuits/
+          if git diff --cached --quiet; then
+            echo "Nothing to update."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Update snapshot and circuit to ${{ steps.race.outputs.name }}"
+          git push

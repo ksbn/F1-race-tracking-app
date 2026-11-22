@@ -56,7 +56,15 @@ python3 snapshot.py              # from OpenF1: tyres, weather, race control, tr
 python3 snapshot_jolpica.py      # from Jolpica: positions, lap times, derived gaps
 ```
 
-Both write `snapshot.json.gz` and overwrite the existing one. `snapshot.py` only works while OpenF1 allows access. On macOS with a python.org install, run `Install Certificates.command` once if you get an SSL certificate error.
+Both write `snapshot.json.gz` and overwrite the existing one. `snapshot.py` only works while OpenF1 allows access.
+
+The track map uses `circuits/<circuit>.json` (for example `circuits/las-vegas.json`). If the current circuit has no file, the map stays empty. To add one:
+
+```bash
+python3 circuit_outline.py "Las Vegas"   # OpenF1 circuit_short_name; saves the fastest lap of the latest race there
+```
+
+The **Update latest race** GitHub Action (`.github/workflows/update-latest-race.yml`) does both every Monday at 12:00 UTC: it regenerates the snapshot when a newer race has finished, adds the circuit file if it is missing, and commits the result. Run it by hand from the Actions tab with **Run workflow**. On macOS with a python.org install, run `Install Certificates.command` once if you get an SSL certificate error.
 
 ## Configuration
 

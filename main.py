@@ -310,23 +310,13 @@ def snap_matches():
 
 
 def circuit_file():
-    """Saved outline for the current circuit with robust fallbacks."""
+    """Saved outline for the current circuit, or [] if there is none (never another circuit's outline)."""
     session_info = state.get("session") or {}
     name = (session_info.get("circuit_short_name") or "").strip().lower().replace(" ", "-")
-    
     path = os.path.join("circuits", f"{name}.json")
     if name and os.path.exists(path):
         with open(path) as f:
             return json.load(f)
-            
-    # Fallback: if exact match isn't found or session isn't loaded, pick any available circuit file
-    if os.path.exists("circuits"):
-        files = [f for f in os.listdir("circuits") if f.endswith(".json")]
-        if files:
-            fallback_path = os.path.join("circuits", files[0])
-            with open(fallback_path) as f:
-                return json.load(f)
-                
     return []
 
 @app.get("/api/laps")
